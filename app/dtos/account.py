@@ -25,6 +25,7 @@ class AccountUpdateDTO(BaseModel):
     worker_id: Optional[str] = Field(None, min_length=3, max_length=50, description="New username for the account")
     worker_enpw: Optional[str] = Field(None, min_length=8, description="New password for the account")
     worker_name: Optional[str] = Field(None, description="New email address for the account")
+    display_type: Optional[str] = Field(None, max_length=20, description="사용자 그룹")
 
 class AccountResponseDTO(BaseModel):
     """

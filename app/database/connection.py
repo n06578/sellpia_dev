@@ -8,7 +8,7 @@ import logging
 # 예: logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-
+# 해당 파일에 트랜잭션 추가
 class MySQLConnection:
     def __init__(self, host=None, port=None, user=None, password=None, database=None):
         # YTEST: DB 연결 정보.

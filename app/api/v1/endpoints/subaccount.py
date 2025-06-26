@@ -14,13 +14,13 @@ router = APIRouter()
 def get_subaccount_service() -> SubAccountService:
     return SubAccountService(subaccount_repo=SubAccountRepository())
 
-# "/subaccount" 라우터의 엔드포인트에 적용될 인증 의존성을 생성합니다.
-# 여기서는 "ip_range" 타입의 인증을 사용하도록 설정합니다.
+# 라우터의 엔드포인트에 적용될 인증 의존성 생성 - "/subaccount"
+# 타입의 인증을 사용하도록 설정 - "ip_range"
 subaccount_auth_dependency = Depends(create_auth_dependency("ip_range"))
 
 # POST / 요청을 처리하여 새로운 계정을 생성하는 엔드포인트입니다.
-# 응답 모델은 SubAccountResponseDTO이며, 성공 시 상태 코드는 201 (Created)입니다.
-# subaccount_auth_dependency를 통해 이 엔드포인트에 접근하기 전에 인증을 수행합니다.
+# 응답 모델 - SubAccountResponseDTO
+# 엔드포인트에 접근하기 전에 인증을 수행 - subaccount_auth_dependency
 @router.post("/", response_model=SubAccountResponseDTO, status_code=status.HTTP_201_CREATED, dependencies=[subaccount_auth_dependency])
 async def create_subaccount(
     subaccount_in: SubAccountCreateDTO, # 요청 본문으로 받을 데이터의 DTO (Data Transfer Object)

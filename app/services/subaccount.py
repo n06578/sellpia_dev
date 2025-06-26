@@ -45,7 +45,7 @@ class SubAccountService:
         )
 
     def get_subaccount(self, subaccount_id: int) -> Optional[SubAccountResponseDTO]:
-        return None  # YCHECK실패처리
+        # return None  # YCHECK실패처리
         subaccount = self.subaccount_repo.get(subaccount_id)
         if subaccount:
             return SubAccountResponseDTO.model_validate(subaccount) ###ERR
