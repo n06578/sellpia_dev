@@ -22,7 +22,7 @@ class MySQLConnection:
         self.host = host if host is not None else "localhost"
         self.port = port if port is not None else 3306
         self.user = user if user is not None else "root"
-        self.password = password if password is not None else "Nyoun003310!"  # 사용자 제공 비밀번호
+        self.password = password if password is not None else "N121212!!"  # 사용자 제공 비밀번호
         self.database = database if database is not None else "sellpia_test"  # 사용자 제공 DB 이름
 
         self.connection = None

@@ -10,8 +10,8 @@ class Settings(BaseSettings):
     MYSQL_HOST: str = "localhost"
     MYSQL_PORT: int = 3306
     MYSQL_USER: str = "root"
-    MYSQL_PASSWORD: str = "Nyoun003310!"
-    MYSQL_ROOT_PASSWORD: str = "Nyoun003310" # YTEST: 계정 생성 시 사용할 MySQL root 계정 비밀번호
+    MYSQL_PASSWORD: str = "N121212!!"
+    MYSQL_ROOT_PASSWORD: str = "N121212!" # YTEST: 계정 생성 시 사용할 MySQL root 계정 비밀번호
     MYSQL_DB: str = "sellpia_test" # YTEST: 초기 DB 연결 시 사용할 기본 DB
 
     ALLOWED_IP_RANGES: list[str] = ["127.0.0.1/32","testclient"] # YTEST: 허용할 IP 대역 목록
