@@ -1,11 +1,13 @@
 ﻿# YTEST: /subaccount 엔드포인트 정의
 from fastapi import APIRouter, Depends, HTTPException, status
-from app.dtos.subaccount import SubAccountCreateDTO, SubAccountUpdateDTO, SubAccountResponseDTO
+from app.dtos.subaccount import SubAccountCreateDTO, SubAccountUpdateDTO, SubAccountResponseDTO,SubAccountPasswordUpdateDTO
 from app.services.subaccount import SubAccountService
 from app.repositories.subaccount import SubAccountRepository
 from app.core.security import create_auth_dependency # 인증 의존성 생성 함수 임포트
 from typing import List
+import logging
 
+logger = logging.getLogger(__name__)
 # APIRouter 인스턴스를 생성하여 이 파일의 엔드포인트들을 그룹화합니다.
 router = APIRouter()
 
@@ -26,56 +28,36 @@ async def create_subaccount(
     subaccount_in: SubAccountCreateDTO, # 요청 본문으로 받을 데이터의 DTO (Data Transfer Object)
     subaccount_service: SubAccountService = Depends(get_subaccount_service) # SubAccountService 의존성 주입
 ):
-    """
-    새로운 계정을 생성합니다.
-    - subaccount_in: 생성할 계정 정보를 담은 DTO.
-    - subaccount_service: 계정 관련 비즈니스 로직을 처리하는 서비스.
-    성공 시 생성된 계정 정보를, 실패 시 적절한 HTTP 예외를 반환합니다.
-    """
     try:
-        # SubAccountService를 사용하여 계정 생성 로직을 호출합니다.
         new_subaccount = subaccount_service.create_subaccount(subaccount_in)
-        print(new_subaccount)
         return new_subaccount
     except ValueError as e:
-        # 서비스 계층에서 중복 등의 이유로 ValueError가 발생하면 409 Conflict를 반환합니다.
+        # 서비스 계층에서 중복 등의 이유로 ValueError가 발생하면 409 Conflict를 반환
+        logger.warning(f"아이디 중복 (valueError) : {str(e)}")
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except Exception as e:
-        # 그 외 예상치 못한 오류 발생 시 500 Internal Server Error를 반환합니다.
+        # 그 외 예상치 못한 오류 발생 시 500 Internal Server Error를 반환.
+        logger.error(f"계정 생성 오류(Failed to create subaccount) : {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create subaccount: {e}")
 
-# GET /{subaccount_id} 요청을 처리하여 특정 ID의 계정 정보를 조회하는 엔드포인트입니다.
-# 응답 모델은 SubAccountResponseDTO입니다.
-# subaccount_auth_dependency를 통해 인증을 수행합니다.
 @router.get("/{subaccount_id}", response_model=SubAccountResponseDTO, dependencies=[subaccount_auth_dependency])
 async def read_subaccount(
-    subaccount_id: int, # 경로 매개변수로 받을 계정 ID
+    subaccount_id: str, # 경로 매개변수로 받을 계정 ID
     subaccount_service: SubAccountService = Depends(get_subaccount_service) # SubAccountService 의존성 주입
 ):
-    """
-    특정 ID의 계정 정보를 조회합니다.
-    - subaccount_id: 조회할 계정의 ID.
-    - subaccount_service: 계정 조회 로직을 처리하는 서비스.
-    계정이 존재하면 계정 정보를, 없으면 404 Not Found 예외를 반환합니다.
-    """
-    # SubAccountService를 사용하여 특정 계정 정보를 가져옵니다.
     try:
-        # SubAccountService의 get_subaccounts 함수가 비동기(async)라면,
-        # 반드시 'await' 키워드를 사용하여 호출해야 합니다.
         subaccount = subaccount_service.get_subaccount(subaccount_id)  # 서비스 호출
         if not subaccount:
-            # 계정이 없거나 서비스에서 None을 반환한 경우 명시적으로 404 처리
+            logger.warning(f"아이디 미 존재 조회 불가 : {subaccount_id}")
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SubAccount not found")
-        return subaccount  # 유효한 subaccount 객체 반환
+        return subaccount
     except HTTPException as http_exc:  # 이미 HTTPException인 경우 그대로 전달
         raise http_exc
-    except ValueError as ve:  # 서비스에서 발생 가능한 특정 비즈니스 오류
+    except ValueError as ve:
+        logger.error(f"서비스에서 발생 가능한 특정 비즈니스 오류 : {str(ve)}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
     except Exception as e:
-        # 기타 예상치 못한 오류
-        # 서비스나 리포지토리 계층에서 오류 발생 시 로그를 남기고,
-        # 클라이언트에게는 일반적인 서버 오류 메시지를 반환합니다.
-        print(f"Error in read_subaccount for ID {subaccount_id}: {e}")  # 디버깅용 로그
+        logger.error(f"Error in read_subaccount for ID : {subaccount_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An internal server error occurred."
@@ -120,7 +102,7 @@ async def read_subaccounts(
 # subaccount_auth_dependency를 통해 인증을 수행합니다.
 @router.patch("/{subaccount_id}", response_model=SubAccountResponseDTO, dependencies=[subaccount_auth_dependency])
 async def update_subaccount(
-    subaccount_id: int, # 경로 매개변수로 받을 수정할 계정의 ID
+    subaccount_id: str, # 경로 매개변수로 받을 수정할 계정의 ID
     subaccount_in: SubAccountUpdateDTO, # 요청 본문으로 받을 수정할 계정 정보 DTO
     subaccount_service: SubAccountService = Depends(get_subaccount_service) # SubAccountService 의존성 주입
 ):
@@ -138,12 +120,26 @@ async def update_subaccount(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SubAccount not found or update failed")
     return updated_subaccount
 
-# DELETE /{subaccount_id} 요청을 처리하여 특정 ID의 계정을 삭제하는 엔드포인트입니다.
-# 성공 시 상태 코드는 204 (No Content)입니다.
-# subaccount_auth_dependency를 통해 인증을 수행합니다.
+@router.patch("/{subaccount_id}/password", response_model=SubAccountResponseDTO, dependencies=[subaccount_auth_dependency])
+async def update_subaccount_password(
+    subaccount_id: str,
+    password_data: SubAccountPasswordUpdateDTO,  # <-- JSON 본문으로 데이터를 받습니다.
+    subaccount_service: SubAccountService = Depends(get_subaccount_service)
+):
+    updated_password = subaccount_service.update_subaccount_pw(
+        sellpia_id="sellpia",  # 이 값은 인증 정보에서 가져오는 것이 더 좋습니다.
+        subaccount_id=subaccount_id,
+        subaccount_now_pw=password_data.current_password,
+        subaccount_new_pw=password_data.new_password
+    )
+    if not updated_password:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SubAccount not found or update failed")
+    return updated_password
+
+
 @router.delete("/{subaccount_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[subaccount_auth_dependency])
 async def delete_subaccount(
-    subaccount_id: int, # 경로 매개변수로 받을 삭제할 계정의 ID
+    subaccount_id: str, # 경로 매개변수로 받을 삭제할 계정의 ID
     subaccount_service: SubAccountService = Depends(get_subaccount_service) # SubAccountService 의존성 주입
 ):
     """

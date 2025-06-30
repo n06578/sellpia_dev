@@ -1,124 +1,78 @@
-import mysql.connector
 from mysql.connector import Error
-from app.models.subaccount import SubAccount
+from app.repositories.subaccount_models import SubAccount
 from app.dtos.subaccount import SubAccountCreateDTO, SubAccountUpdateDTO
 from app.repositories.base import BaseRepository
-from app.core.config import settings
 from app.database.connection import MySQLConnection
-from app.database.triggers import TriggerQueries
-from app.database.events import EventQueries
 from typing import List, Optional
-import re
 from datetime import datetime
 import logging
+import hashlib
 
 logger = logging.getLogger(__name__)
 class SubAccountRepository(BaseRepository[SubAccount, SubAccountCreateDTO, SubAccountUpdateDTO]):
     def __init__(self):
         pass
 
-    def _is_valid_account_name(self, account_name: str) -> bool:
-        # YTEST: 계정 이름 유효성 검사 (MySQL DB, User 이름 규칙 및 예약어 방지)
-        if not re.match(r"^[a-zA-Z0-9_]{3,30}$", account_name):
-            return False
-        # YTEST: MySQL 예약어나 시스템 DB 이름과 충돌 방지 (추가 필요시)
-        reserved_words = ["mysql", "information_schema", "performance_schema", "sys", "admin", "root", "user", "test"]
-        if account_name.lower() in reserved_words:
-            return False
-        return True
-
-    def _execute_admin_query(self, query: str, params: tuple = None, multi: bool = False):
-        # YTEST: MySQL root 계정으로 관리 쿼리 실행
-        try:
-            with MySQLConnection(user=settings.MYSQL_USER, password=settings.MYSQL_ROOT_PASSWORD) as conn:
-                if conn:
-                    cursor = conn.cursor()
-                    if multi:
-                        # YTEST: 여러 SQL 문을 포함하는 쿼리 실행 (예: 스키마 SQL 파일)
-                        for result in cursor.execute(query, params, multi=True):
-                            pass  # Fetch all results to ensure execution completion
-                    else:
-                        cursor.execute(query, params)
-                    conn.commit()
-                    return cursor
-        except Error as e:
-            print(f"Error executing admin query: {e}")
-            raise  # YTEST: 오류 발생 시 예외 다시 발생
-
-    def _execute_account_db_query(self, db_name: str, query: str, params: tuple = None, multi: bool = False):
-        # YTEST: 특정 계정 DB에 대한 쿼리 실행 (root 권한으로 해당 DB 접근)
-        try:
-            with MySQLConnection(database=db_name, user=settings.MYSQL_USER, password=settings.MYSQL_ROOT_PASSWORD) as conn:
-                if conn:
-                    cursor = conn.cursor()
-                    if multi:
-                        for result in cursor.execute(query, params, multi=True):
-                            pass
-                    else:
-                        cursor.execute(query, params)
-                    conn.commit()
-                    return cursor
-        except Error as e:
-            print(f"Error executing account DB query for {db_name}: {e}")
-            raise
-
-    def create(self, obj_in: SubAccountCreateDTO) -> SubAccount:
-        # YTEST: 새 계정 생성 및 MySQL DB/사용자 할당
-        if not self._is_valid_account_name(obj_in.username):
-            raise ValueError(f"Invalid or reserved account name: {obj_in.username}")
-
-        # YTEST: 이미 존재하는 DB 이름 또는 사용자 이름인지 확인
-
+    def get_by_field(self, field: str, value: str) -> Optional[SubAccount]:
+        # YTEST: 특정 필드(예: username)로 계정 정보 조회 (현재는 DB 이름 존재 여부만 확인)
         try:
             with MySQLConnection() as conn:
                 if conn:
                     cursor = conn.cursor()
-                    cursor.execute(
-                        f"SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = '{obj_in.username}'")
-                    if cursor.fetchone():
-                        raise ValueError(f"SubAccount with username '{obj_in.username}' already exists (DB name taken).")
-                    cursor.execute(f"SELECT User FROM mysql.user WHERE User = '{obj_in.username}'")
-                    if cursor.fetchone():
-                        raise ValueError(f"SubAccount with username '{obj_in.username}' already exists (DB user taken).")
+                    cursor.execute(f"SELECT worker_id FROM worker WHERE {field} = '{value}'")
+                    result = cursor.fetchone()  # <--- fetchall() 대신 fetchone()을 사용합니다.
+                    cursor.close()
+                    if result:
+                        return SubAccount(worker_id = value)
+        except Error as e:
+            raise RuntimeError(f"Database check failed: {e}")
+        return None
+
+    def create(self, obj_in: SubAccountCreateDTO) -> SubAccount:
+        # DB 부운영자 추가
+        now = datetime.now()
+        now_date = now.strftime('%Y-%m-%d')
+        now_datetime=  now.strftime('%Y-%m-%d %H:%M:%S')
+        try:
+            with MySQLConnection() as conn:
+                if conn:
+                    insert_data = obj_in.model_dump(exclude_unset=True)
+                    if not insert_data:
+                        logger.warning(f"Update called for worker_uid {id} but no data was provided.")
+                        return self.get(obj_in.worker_id)
+                    # db 저장시 필요한 기본값 설정
+                    insert_data["reg_date"] = now_datetime
+                    insert_data["pw_chg_date"] = now_date
+                    insert_data["login_time"] = "1970-12-31 00:00:00"
+                    insert_data["access_pos_shop_uid"] = "0"
+                    insert_data["worker_enpw"] = self.hash_password("sellpia", obj_in.worker_enpw)
+
+                    #query 작성
+                    set_clause = ", ".join([f"`{key}` = %s" for key in insert_data.keys()])
+                    query = f"INSERT INTO `worker` SET {set_clause}"
+                    params = tuple(insert_data.values())
+
+                    #mysql 접속 후 query 실행
+                    cursor = conn.cursor()
+                    cursor.execute(query, params)
+                    conn.commit()
+                    cursor.close()
         except Error as e:
             raise RuntimeError(f"Database check failed: {e}")
 
-        db_name = db_user = obj_in.username
-        db_password = obj_in.password  # YTEST: 실제 환경에서는 보안 강화 필요 (랜덤 비밀번호 생성, 해싱 등)
+        return SubAccount(worker_id = obj_in.worker_id,worker_enpw = obj_in.worker_enpw,worker_name = obj_in.worker_name)
 
-        # YTEST: MySQL DB 및 사용자 생성, 권한 부여
-        self._execute_admin_query(f"CREATE DATABASE IF NOT EXISTS `{db_name}`;")
-        self._execute_admin_query(f"CREATE USER '{db_user}'@'localhost' IDENTIFIED BY '{db_password}';")
-        self._execute_admin_query(f"GRANT ALL PRIVILEGES ON `{db_name}`.* TO '{db_user}'@'localhost';")
-        self._execute_admin_query("FLUSH PRIVILEGES;")  # YTEST: 권한 변경 즉시 적용
-
-        # YTEST: 계정 DB에 초기 스키마 적용
-        with open("app/database/schemas.sql", "r") as f:
-            schemas_sql_content = f.read()
-        self._execute_account_db_query(db_name, schemas_sql_content, multi=True)
-
-        # YTEST: 트리거 및 이벤트 생성
-        self._execute_account_db_query(db_name, TriggerQueries.create_user_insert_log_trigger(db_name))
-        self._execute_account_db_query(db_name, EventQueries.create_daily_cleanup_event(db_name))
-
-        # YTEST: 계정 정보 (users 테이블에) 초기 삽입
-        insert_initial_data_query = "INSERT INTO users (worker_id, worker_enpw) VALUES (%s, %s);"
-        self._execute_account_db_query(db_name, insert_initial_data_query, params=(db_user, obj_in.email))
-
-        return SubAccount(id=1, username=obj_in.username, password=obj_in.password, email=obj_in.email, created_at=datetime.now(), db_name=db_name, db_user=db_user, db_password=db_password)
-
-    def get(self, id: int) -> Optional[SubAccount]:
-        # YTEST: 계정 정보 조회 (현재는 더미 데이터)
-        account: List[SubAccount] = []
+    def get(self, id: str) -> Optional[SubAccount]: 
+        # 단일 계정 조회
+        logger.warning(f"?? {id}")
         query = """
                     SELECT * FROM worker 
-                    WHERE worker_uid = %s AND is_del != 'Y' AND display_type=''
+                    WHERE worker_id = %s AND is_del = 'N' AND display_type=''
                 """
         try:
             with MySQLConnection() as conn:
-                conns = conn
                 if not conn:
-                    logger.error(f"Failed to get DB connection for get(id={id}).")
+                    logger.error(f"db 접속 실패 : get({id}).")
                     return None
                 cursor = conn.cursor(dictionary=True)
                 cursor.execute(query, (id,))
@@ -127,31 +81,14 @@ class SubAccountRepository(BaseRepository[SubAccount, SubAccountCreateDTO, SubAc
 
                 if result:
                     logger.info(f"SubAccount found for worker_uid: {id}")
-                    # DB에서 받은 딕셔너리로 SubAccount 모델 인스턴스를 생성하여 반환합니다.
                     return SubAccount(**result)
                 else:
                     logger.warning(f"SubAccount not found for worker_uid: {id}")
                     return None
+
         except Error as e:
             logger.error(f"Error retrieving multiple accounts: {e}", exc_info=True)
             raise RuntimeError(f"Failed to retrieve accounts from database: {e}")
-
-    def get_by_field(self, field: str, value: str) -> Optional[SubAccount]:
-        # YTEST: 특정 필드(예: username)로 계정 정보 조회 (현재는 DB 이름 존재 여부만 확인)
-        if field == "worker_uid":
-            try:
-                with MySQLConnection() as conn:
-                    if conn:
-                        cursor = conn.cursor()
-                        cursor.execute(
-                            f"SELECT worker_id FROM worker WHERE worker_id = '{value}'")
-                        result = cursor.fetchone()  # <--- fetchall() 대신 fetchone()을 사용합니다.
-                        cursor.close()
-                        if result:
-                            return SubAccount(**result)
-            except Error as e:
-                raise RuntimeError(f"Database check failed: {e}")
-        return None
 
     def get_multi(self, skip: int = 0, limit: int = 100) -> List[SubAccount]:
         # YTEST: 여러 계정 정보 조회 (현재는 더미 데이터)
@@ -193,29 +130,96 @@ class SubAccountRepository(BaseRepository[SubAccount, SubAccountCreateDTO, SubAc
 
         return accounts
 
-    def update(self, id: int, obj_in: SubAccountUpdateDTO) -> Optional[SubAccount]:
-        # YTEST: 계정 정보 업데이트 (현재는 비밀번호 변경만 예시)
-        print(f"YTEST: Updating account with ID: {id} with data: {obj_in.model_dump_json()} (Not fully implemented)")
-        if obj_in.password and obj_in.username:  # YTEST: 계정 이름이 DTO에 포함되어야 함
-            try:
-                self._execute_admin_query(
-                    f"ALTER USER '{obj_in.username}'@'localhost' IDENTIFIED BY '{obj_in.password}';")
-                print(f"YTEST: Password for {obj_in.username} updated.")
-            except Error as e:
-                raise RuntimeError(f"Failed to update user password: {e}")
-        # YTEST: 업데이트된 계정 정보를 다시 조회하여 반환 (실제로는 업데이트된 필드를 반영)
-        updated_account = self.get(id)
-        if updated_account and obj_in.email:
-            updated_account.email = obj_in.email  # YTEST: 이메일만 로컬 업데이트 예시
-        return updated_account
+    def update(self, id: str, obj_in: SubAccountUpdateDTO) -> Optional[SubAccount]:
+        # 계정 정보 수정
+        now = datetime.now()
+        now_datetime=  now.strftime('%Y-%m-%d %H:%M:%S')
+        try:
+            with MySQLConnection() as conn:
+                if conn:
+                    update_data = obj_in.model_dump(exclude_unset=True)
+                    updated_subaccount = self.get(id)
 
-    def delete(self, id: int) -> bool:
-        # YTEST: 계정 및 관련 DB/사용자 삭제 (현재는 더미 계정 이름 사용)
-        account_to_delete_name = "test_account"  # YTEST: 실제로는 DB에서 ID를 통해 계정 이름을 조회해야 함
-        # YTEST: 사용자, 이벤트, 트리거, DB 삭제
-        self._execute_admin_query(f"DROP USER IF EXISTS '{account_to_delete_name}'@'localhost';")
-        self._execute_account_db_query(account_to_delete_name, EventQueries.drop_daily_cleanup_event(account_to_delete_name))
-        self._execute_account_db_query(account_to_delete_name, TriggerQueries.drop_user_insert_log_trigger(account_to_delete_name))
-        self._execute_admin_query(f"DROP DATABASE IF EXISTS `{account_to_delete_name}`;")
-        print(f"YTEST: SubAccount with ID: {id} and all associated resources deleted.")
+                    if not update_data:
+                        logger.warning(f"Update called for worker_uid {id} but no data was provided.")
+                        return updated_subaccount
+
+                    if "worker_enpw" in update_data:
+                        update_data["pw_chg_date"] = now_datetime
+
+                    set_clause = ", ".join([f"`{key}` = %s" for key in update_data.keys()])
+                    print(set_clause)
+                    query = f"UPDATE `worker` SET {set_clause} WHERE `worker_id` = %s AND is_del='N'"
+                    params = tuple(update_data.values()) + (id,)
+
+                    cursor = conn.cursor()
+                    cursor.execute(query, params)
+                    conn.commit()
+                    cursor.close()
+        except Error as e:
+            raise RuntimeError(f"Database check failed: {e}")
+
+        return updated_subaccount
+
+    def update_pw(self, sellpia_id: str, id: str, now_password :str, new_password: str):
+        # 계정 정보 수정
+        now = datetime.now()
+        now_datetime=  now.strftime('%Y-%m-%d')
+        now_password = self.hash_password(sellpia_id, now_password)
+        new_password = self.hash_password(sellpia_id, new_password)
+        try:
+            with MySQLConnection() as conn:
+                if conn:
+                    query = f"UPDATE `worker` SET `worker_enpw`=%s, `pw_chg_date`=%s WHERE `worker_id` = %s AND `worker_enpw` = %s AND is_del='N'"
+                    cursor = conn.cursor()
+                    cursor.execute(query, (new_password, now_datetime, id, now_password, ))
+                    rows_affected = cursor.rowcount
+                    conn.commit()
+                    cursor.close()
+                if rows_affected < 1:
+                    logger.warning(f"No Change Password {id}")
+                    return None
+        except Error as e:
+            raise RuntimeError(f"Database check failed: {e}")
+        change_pw_subaccount = self.get(id)
+        print(change_pw_subaccount)
+        return change_pw_subaccount
+
+    def delete(self, id: str) -> bool:
+        query = "UPDATE worker SET is_del = 'Y' WHERE worker_id = %s AND is_del = 'N'"
+        try:
+            with MySQLConnection() as conn:
+                if not conn:
+                    logger.error(f"Failed to get DB connection for delete(id={id}).")
+                    return False
+
+                cursor = conn.cursor()
+                cursor.execute(query, (id,))
+                conn.commit()
+
+                # cursor.rowcount는 쿼리에 의해 영향을 받은 행의 수를 반환합니다.
+                # 1이면 성공적으로 업데이트된 것이고, 0이면 해당 ID의 계정이 없거나 이미 삭제된 상태입니다.
+                rows_affected = cursor.rowcount
+                cursor.close()
+
+                if rows_affected > 0:
+                    logger.info(f"Successfully soft-deleted account with worker_uid: {id}")
+                    return True
+                else:
+                    logger.warning(f"Account with worker_uid: {id} not found or already deleted. No rows affected.")
+                    return False
+
+        except Error as e:
+            logger.error(f"Error deleting account for worker_uid {id}: {e}", exc_info=True)
+            # DB 에러가 발생하면 상위 계층에서 처리하도록 예외를 다시 발생시킵니다.
+            raise RuntimeError(f"Failed to delete account in database: {e}")
         return True
+
+    def gen_sha_pwd(self, sellpia_id:str = None ):
+        return "_@)"+''.join(reversed(sellpia_id))+"_!("
+
+    def hash_password(self, sellpia_id:str, password:str):
+        sha = self.gen_sha_pwd(sellpia_id)
+        new_password = password+sha
+        hash_password = hashlib.sha512(new_password.encode()).hexdigest()
+        return hash_password
