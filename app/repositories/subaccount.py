@@ -31,7 +31,6 @@ class SubAccountRepository(BaseRepository[SubAccount, SubAccountCreateDTO, SubAc
     def create(self, obj_in: SubAccountCreateDTO) -> SubAccount:
         # DB 부운영자 추가
         now = datetime.now()
-        now_date = now.strftime('%Y-%m-%d')
         now_datetime=  now.strftime('%Y-%m-%d %H:%M:%S')
         try:
             with MySQLConnection() as conn:
@@ -42,10 +41,6 @@ class SubAccountRepository(BaseRepository[SubAccount, SubAccountCreateDTO, SubAc
                         return self.get(obj_in.worker_id)
                     # db 저장시 필요한 기본값 설정
                     insert_data["reg_date"] = now_datetime
-                    insert_data["pw_chg_date"] = now_date
-                    insert_data["login_time"] = "1970-12-31 00:00:00"
-                    insert_data["access_pos_shop_uid"] = "0"
-                    insert_data["worker_enpw"] = self.hash_password("sellpia", obj_in.worker_enpw)
 
                     #query 작성
                     set_clause = ", ".join([f"`{key}` = %s" for key in insert_data.keys()])
@@ -60,7 +55,7 @@ class SubAccountRepository(BaseRepository[SubAccount, SubAccountCreateDTO, SubAc
         except Error as e:
             raise RuntimeError(f"Database check failed: {e}")
 
-        return SubAccount(worker_id = obj_in.worker_id,worker_enpw = obj_in.worker_enpw,worker_name = obj_in.worker_name)
+        return SubAccount(worker_id = obj_in.worker_id,worker_name = obj_in.worker_name)
 
     def get(self, id: str) -> Optional[SubAccount]: 
         # 단일 계정 조회

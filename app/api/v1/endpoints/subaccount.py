@@ -1,6 +1,6 @@
 ﻿# YTEST: /subaccount 엔드포인트 정의
 from fastapi import APIRouter, Depends, HTTPException, status
-from app.dtos.subaccount import SubAccountCreateDTO, SubAccountUpdateDTO, SubAccountResponseDTO,SubAccountPasswordUpdateDTO
+from app.dtos.subaccount import SubAccountCreateDTO, SubAccountUpdateDTO, SubAccountResponseDTO, BulkCreateResponseDTO
 from app.services.subaccount import SubAccountService
 from app.repositories.subaccount import SubAccountRepository
 from app.core.security import create_auth_dependency # 인증 의존성 생성 함수 임포트
@@ -39,6 +39,29 @@ async def create_subaccount(
         # 그 외 예상치 못한 오류 발생 시 500 Internal Server Error를 반환.
         logger.error(f"계정 생성 오류(Failed to create subaccount) : {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create subaccount: {e}")
+
+@router.post("/bulk", response_model=BulkCreateResponseDTO, status_code=status.HTTP_200_OK, dependencies=[subaccount_auth_dependency])
+async def create_subaccounts_bulk(
+    subaccounts_in: List[SubAccountCreateDTO], # 요청 본문으로 '리스트'를 받습니다.
+    subaccount_service: SubAccountService = Depends(get_subaccount_service)
+):
+    """
+    여러 부계정을 일괄적으로 생성합니다.
+
+    - **요청 본문**: 생성할 계정 정보 객체의 배열(리스트)
+    - **응답**: 성공적으로 생성된 계정 목록과 실패한 계정 목록(실패 사유 포함)을 반환합니다.
+    """
+    try:
+        result = subaccount_service.create_subaccounts_bulk(subaccounts_in)
+        return result
+    except Exception as e:
+        # 서비스 로직 자체에서 예상치 못한 큰 오류가 발생한 경우
+        logger.error(f"일괄 생성 API 처리 중 심각한 오류 발생: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred during the bulk creation process."
+        )
+
 
 @router.get("/{subaccount_id}", response_model=SubAccountResponseDTO, dependencies=[subaccount_auth_dependency])
 async def read_subaccount(
@@ -119,22 +142,6 @@ async def update_subaccount(
         # 계정이 존재하지 않거나 업데이트에 실패하면 404 Not Found 오류를 발생시킵니다.
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SubAccount not found or update failed")
     return updated_subaccount
-
-@router.patch("/{subaccount_id}/password", response_model=SubAccountResponseDTO, dependencies=[subaccount_auth_dependency])
-async def update_subaccount_password(
-    subaccount_id: str,
-    password_data: SubAccountPasswordUpdateDTO,  # <-- JSON 본문으로 데이터를 받습니다.
-    subaccount_service: SubAccountService = Depends(get_subaccount_service)
-):
-    updated_password = subaccount_service.update_subaccount_pw(
-        sellpia_id="sellpia",  # 이 값은 인증 정보에서 가져오는 것이 더 좋습니다.
-        subaccount_id=subaccount_id,
-        subaccount_now_pw=password_data.current_password,
-        subaccount_new_pw=password_data.new_password
-    )
-    if not updated_password:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SubAccount not found or update failed")
-    return updated_password
 
 
 @router.delete("/{subaccount_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[subaccount_auth_dependency])

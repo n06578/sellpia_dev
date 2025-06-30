@@ -1,9 +1,11 @@
 # YTEST: 계정 관련 비즈니스 로직 (리포지토리와 컨트롤러/엔드포인트 연결)
-from app.dtos.subaccount import SubAccountCreateDTO, SubAccountUpdateDTO, SubAccountResponseDTO
+from app.dtos.subaccount import SubAccountCreateDTO, SubAccountUpdateDTO, SubAccountResponseDTO, BulkCreateResponseDTO, BulkCreateErrorDetail
 from app.repositories.subaccount_models import SubAccount
 from app.repositories.subaccount import SubAccountRepository
 from typing import List, Optional
+import logging
 
+logger = logging.getLogger(__name__)
 class SubAccountService:
     def __init__(self, subaccount_repo: SubAccountRepository):
         self.subaccount_repo = subaccount_repo
@@ -22,6 +24,37 @@ class SubAccountService:
             worker_name=str(created_subaccount.worker_name)
         )
 
+    def create_subaccounts_bulk(self, subaccounts_in: List[SubAccountCreateDTO]) -> BulkCreateResponseDTO:
+        """
+        여러 부계정을 일괄적으로 생성합니다.
+        개별 생성의 성공/실패를 나누어 결과를 반환합니다.
+        """
+        successful_creations = []
+        failed_creations = []
+
+        for account_dto in subaccounts_in:
+            try:
+                # 기존의 단일 생성 메서드를 재사용합니다.
+                new_account = self.create_subaccount(account_dto)
+                successful_creations.append(new_account)
+            except ValueError as e:
+                # 중복 아이디 등 예측된 오류(ValueError) 발생 시 실패 목록에 추가
+                logger.warning(f"일괄 생성 중 아이디 중복: {account_dto.worker_id}, 사유: {e}")
+                failed_creations.append(
+                    BulkCreateErrorDetail(attempted_id=account_dto.worker_id, reason=str(e))
+                )
+            except Exception as e:
+                # 그 외 예상치 못한 오류 발생 시 실패 목록에 추가
+                logger.error(f"일괄 생성 중 예외 발생: {account_dto.worker_id}, 오류: {e}", exc_info=True)
+                failed_creations.append(
+                    BulkCreateErrorDetail(attempted_id=account_dto.worker_id, reason="An unexpected internal error occurred.")
+                )
+
+        return BulkCreateResponseDTO(
+            successful_creates=successful_creations,
+            failed_creates=failed_creations
+        )
+
     def get_subaccount(self, subaccount_id: str) -> Optional[SubAccountResponseDTO]:
         # 단일 계정 호출
         subaccount = self.subaccount_repo.get(subaccount_id)
@@ -34,13 +67,6 @@ class SubAccountService:
 
         if updated_subaccount:
             return SubAccountResponseDTO.model_validate(updated_subaccount)
-        return None
-
-    def update_subaccount_pw(self,sellpia_id:str, subaccount_id: str, subaccount_now_pw: str, subaccount_new_pw: str):
-        updated_subaccount_pw = self.subaccount_repo.update_pw(sellpia_id,subaccount_id, subaccount_now_pw, subaccount_new_pw)
-
-        if updated_subaccount_pw:
-            return SubAccountResponseDTO.model_validate(updated_subaccount_pw)
         return None
 
     def delete_subaccount(self, subaccount_id: str) -> bool:
