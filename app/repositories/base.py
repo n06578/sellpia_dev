@@ -17,14 +17,6 @@ class BaseRepository(ABC, Generic[ModelType, CreateSchemaType, UpdateSchemaType]
         pass
 
     @abstractmethod
-    def get_by_field(self, field: str, value: str) -> Optional[ModelType]:
-        pass
-
-    @abstractmethod
-    def get_multi(self, skip: int = 0, limit: int = 100) -> List[ModelType]:
-        pass
-
-    @abstractmethod
     def update(self, id: int, obj_in: UpdateSchemaType) -> Optional[ModelType]:
         pass
 

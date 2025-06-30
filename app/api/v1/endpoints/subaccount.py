@@ -40,28 +40,6 @@ async def create_subaccount(
         logger.error(f"계정 생성 오류(Failed to create subaccount) : {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create subaccount: {e}")
 
-@router.post("/bulk", response_model=BulkCreateResponseDTO, status_code=status.HTTP_200_OK, dependencies=[subaccount_auth_dependency])
-async def create_subaccounts_bulk(
-    subaccounts_in: List[SubAccountCreateDTO], # 요청 본문으로 '리스트'를 받습니다.
-    subaccount_service: SubAccountService = Depends(get_subaccount_service)
-):
-    """
-    여러 부계정을 일괄적으로 생성합니다.
-
-    - **요청 본문**: 생성할 계정 정보 객체의 배열(리스트)
-    - **응답**: 성공적으로 생성된 계정 목록과 실패한 계정 목록(실패 사유 포함)을 반환합니다.
-    """
-    try:
-        result = subaccount_service.create_subaccounts_bulk(subaccounts_in)
-        return result
-    except Exception as e:
-        # 서비스 로직 자체에서 예상치 못한 큰 오류가 발생한 경우
-        logger.error(f"일괄 생성 API 처리 중 심각한 오류 발생: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An unexpected error occurred during the bulk creation process."
-        )
-
 
 @router.get("/{subaccount_id}", response_model=SubAccountResponseDTO, dependencies=[subaccount_auth_dependency])
 async def read_subaccount(
@@ -85,40 +63,6 @@ async def read_subaccount(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An internal server error occurred."
         )
-
-# GET / 요청을 처리하여 여러 계정 정보를 리스트 형태로 조회하는 엔드포인트입니다.
-# 응답 모델은 SubAccountResponseDTO의 리스트(List[SubAccountResponseDTO])입니다.
-# subaccount_auth_dependency를 통해 인증을 수행합니다.
-@router.get("/", response_model=List[SubAccountResponseDTO], dependencies=[subaccount_auth_dependency])
-async def read_subaccounts(
-    skip: int = 0, # 페이지네이션을 위한 건너뛸 항목 수 (쿼리 매개변수)
-    limit: int = 100, # 페이지네이션을 위한 한 번에 가져올 최대 항목 수 (쿼리 매개변수)
-    subaccount_service: SubAccountService = Depends(get_subaccount_service) # SubAccountService 의존성 주입
-):
-    """
-    여러 계정 정보를 리스트 형태로 조회합니다. (페이지네이션 지원)
-    - skip: 건너뛸 레코드 수.
-    - limit: 반환할 최대 레코드 수.
-    - subaccount_service: 계정 목록 조회 로직을 처리하는 서비스.
-    조회된 계정 목록을 반환합니다.
-    """
-    try:
-        # SubAccountService의 get_subaccounts 함수가 비동기(async)라면,
-        # 반드시 'await' 키워드를 사용하여 호출해야 합니다.
-        subaccounts =  subaccount_service.get_subaccounts(skip=skip, limit=limit)
-        return subaccounts
-    except Exception as e:
-        # 서비스나 리포지토리 계층에서 오류 발생 시 로그를 남기고,
-        # 클라이언트에게는 일반적인 서버 오류 메시지를 반환합니다.
-        print("1----------------------------------------------------------------------")
-        print(e)
-        print("1----------------------------------------------------------------------")
-        raise HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while fetching subaccounts."
-        )
-    # SubAccountService를 사용하여 계정 목록을 가져옵니다.
-
 
 # PATCH /{subaccount_id} 요청을 처리하여 특정 ID의 계정 정보를 수정하는 엔드포인트입니다.
 # 응답 모델은 SubAccountResponseDTO입니다.
@@ -160,3 +104,27 @@ async def delete_subaccount(
         # 계정이 존재하지 않거나 삭제에 실패하면 404 Not Found 오류를 발생시킵니다.
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SubAccount not found or delete failed")
     # 성공 시 별도의 응답 본문 없이 204 상태 코드가 반환됩니다.
+
+
+# 부운영자 일괄 저장 (DB CONNECTION 부분 처리 필요)
+# @router.post("/bulk", response_model=BulkCreateResponseDTO, status_code=status.HTTP_200_OK, dependencies=[subaccount_auth_dependency])
+# async def create_subaccounts_bulk(
+#     subaccounts_in: List[SubAccountCreateDTO], # 요청 본문으로 '리스트'를 받습니다.
+#     subaccount_service: SubAccountService = Depends(get_subaccount_service)
+# ):
+#     """
+#     여러 부계정을 일괄적으로 생성합니다.
+#
+#     - **요청 본문**: 생성할 계정 정보 객체의 배열(리스트)
+#     - **응답**: 성공적으로 생성된 계정 목록과 실패한 계정 목록(실패 사유 포함)을 반환합니다.
+#     """
+#     try:
+#         result = subaccount_service.create_subaccounts_bulk(subaccounts_in)
+#         return result
+#     except Exception as e:
+#         # 서비스 로직 자체에서 예상치 못한 큰 오류가 발생한 경우
+#         logger.error(f"일괄 생성 API 처리 중 심각한 오류 발생: {e}", exc_info=True)
+#         raise HTTPException(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             detail="An unexpected error occurred during the bulk creation process."
+#         )

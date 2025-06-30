@@ -13,21 +13,6 @@ class SubAccountRepository(BaseRepository[SubAccount, SubAccountCreateDTO, SubAc
     def __init__(self):
         pass
 
-    def get_by_field(self, field: str, value: str) -> Optional[SubAccount]:
-        # YTEST: 특정 필드(예: username)로 계정 정보 조회 (현재는 DB 이름 존재 여부만 확인)
-        try:
-            with MySQLConnection() as conn:
-                if conn:
-                    cursor = conn.cursor()
-                    cursor.execute(f"SELECT worker_id FROM worker WHERE {field} = '{value}'")
-                    result = cursor.fetchone()  # <--- fetchall() 대신 fetchone()을 사용합니다.
-                    cursor.close()
-                    if result:
-                        return SubAccount(worker_id = value)
-        except Error as e:
-            raise RuntimeError(f"Database check failed: {e}")
-        return None
-
     def create(self, obj_in: SubAccountCreateDTO) -> SubAccount:
         # DB 부운영자 추가
         now = datetime.now()
@@ -55,7 +40,7 @@ class SubAccountRepository(BaseRepository[SubAccount, SubAccountCreateDTO, SubAc
         except Error as e:
             raise RuntimeError(f"Database check failed: {e}")
 
-        return SubAccount(worker_id = obj_in.worker_id,worker_name = obj_in.worker_name)
+        return SubAccount(worker_id = obj_in.worker_id,worker_name = obj_in.worker_name,worker_cellphone = obj_in.worker_cellphone)
 
     def get(self, id: str) -> Optional[SubAccount]: 
         # 단일 계정 조회
@@ -85,46 +70,6 @@ class SubAccountRepository(BaseRepository[SubAccount, SubAccountCreateDTO, SubAc
             logger.error(f"Error retrieving multiple accounts: {e}", exc_info=True)
             raise RuntimeError(f"Failed to retrieve accounts from database: {e}")
 
-    def get_multi(self, skip: int = 0, limit: int = 100) -> List[SubAccount]:
-        # YTEST: 여러 계정 정보 조회 (현재는 더미 데이터)
-        print("YTEST: Retrieving multiple accounts (Not implemented in DB)")
-        """
-                데이터베이스에서 여러 계정 정보를 조회합니다. (페이지네이션 적용)
-                """
-        # logger.info(f"Retrieving multiple accounts from DB with skip={skip}, limit={limit}")
-        accounts: List[SubAccount] = []
-
-        query = """
-                    SELECT * FROM worker 
-                    WHERE is_del != 'Y'
-                    AND display_type=''
-                    ORDER BY worker_uid DESC
-                    LIMIT %s OFFSET %s
-                """
-
-        try:
-            with MySQLConnection() as conn:
-                if not conn:
-                    logger.error("Failed to get database connection for get_multi.")
-                    return []
-
-                cursor = conn.cursor(dictionary=True)
-                cursor.execute(query, (limit, skip))
-                results = cursor.fetchall()
-                cursor.close()
-
-                for row in results:
-                    # 각 row 딕셔너리를 SubAccount 모델 객체로 변환하여 리스트에 추가합니다.
-                    accounts.append(SubAccount(**row))
-
-                logger.info(f"Successfully retrieved {len(accounts)} accounts from DB.")
-
-        except Error as e:
-            logger.error(f"Error retrieving multiple accounts: {e}", exc_info=True)
-            raise RuntimeError(f"Failed to retrieve accounts from database: {e}")
-
-        return accounts
-
     def update(self, id: str, obj_in: SubAccountUpdateDTO) -> Optional[SubAccount]:
         # 계정 정보 수정
         now = datetime.now()
@@ -133,14 +78,11 @@ class SubAccountRepository(BaseRepository[SubAccount, SubAccountCreateDTO, SubAc
             with MySQLConnection() as conn:
                 if conn:
                     update_data = obj_in.model_dump(exclude_unset=True)
-                    updated_subaccount = self.get(id)
 
                     if not update_data:
                         logger.warning(f"Update called for worker_uid {id} but no data was provided.")
+                        updated_subaccount = self.get(id)
                         return updated_subaccount
-
-                    if "worker_enpw" in update_data:
-                        update_data["pw_chg_date"] = now_datetime
 
                     set_clause = ", ".join([f"`{key}` = %s" for key in update_data.keys()])
                     print(set_clause)
@@ -151,34 +93,11 @@ class SubAccountRepository(BaseRepository[SubAccount, SubAccountCreateDTO, SubAc
                     cursor.execute(query, params)
                     conn.commit()
                     cursor.close()
+                    updated_subaccount = self.get(id)
+
         except Error as e:
             raise RuntimeError(f"Database check failed: {e}")
-
         return updated_subaccount
-
-    def update_pw(self, sellpia_id: str, id: str, now_password :str, new_password: str):
-        # 계정 정보 수정
-        now = datetime.now()
-        now_datetime=  now.strftime('%Y-%m-%d')
-        now_password = self.hash_password(sellpia_id, now_password)
-        new_password = self.hash_password(sellpia_id, new_password)
-        try:
-            with MySQLConnection() as conn:
-                if conn:
-                    query = f"UPDATE `worker` SET `worker_enpw`=%s, `pw_chg_date`=%s WHERE `worker_id` = %s AND `worker_enpw` = %s AND is_del='N'"
-                    cursor = conn.cursor()
-                    cursor.execute(query, (new_password, now_datetime, id, now_password, ))
-                    rows_affected = cursor.rowcount
-                    conn.commit()
-                    cursor.close()
-                if rows_affected < 1:
-                    logger.warning(f"No Change Password {id}")
-                    return None
-        except Error as e:
-            raise RuntimeError(f"Database check failed: {e}")
-        change_pw_subaccount = self.get(id)
-        print(change_pw_subaccount)
-        return change_pw_subaccount
 
     def delete(self, id: str) -> bool:
         query = "UPDATE worker SET is_del = 'Y' WHERE worker_id = %s AND is_del = 'N'"
@@ -209,12 +128,3 @@ class SubAccountRepository(BaseRepository[SubAccount, SubAccountCreateDTO, SubAc
             # DB 에러가 발생하면 상위 계층에서 처리하도록 예외를 다시 발생시킵니다.
             raise RuntimeError(f"Failed to delete account in database: {e}")
         return True
-
-    def gen_sha_pwd(self, sellpia_id:str = None ):
-        return "_@)"+''.join(reversed(sellpia_id))+"_!("
-
-    def hash_password(self, sellpia_id:str, password:str):
-        sha = self.gen_sha_pwd(sellpia_id)
-        new_password = password+sha
-        hash_password = hashlib.sha512(new_password.encode()).hexdigest()
-        return hash_password
